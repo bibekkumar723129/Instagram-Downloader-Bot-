@@ -39,11 +39,14 @@ async def main():
 
     await idle()
     
-    logger.info("Stopping Bot...")
-    await app.stop()
+    # We remove app.stop() from here, as it can cause loop-related
+    # errors on forced shutdown (like SIGTERM from Render).
+    # The OS will handle process termination.
+    logger.info("Bot process is idling... Shutdown signal will stop it.")
+    # await app.stop() # <-- This line is removed.
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped manually.")
+        logger.info("Bot stopped manually (KeyboardInterrupt).")
