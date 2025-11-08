@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os  # Import os
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
@@ -12,7 +13,16 @@ from Database.db import (
 logger = logging.getLogger(__name__)
 
 # --- Admin Check Filter ---
-admin_filter = filters.user(ADMIN_ID)
+# Updated to check a list of admins or a single admin
+admin_ids = [ADMIN_ID] if ADMIN_ID else []
+try:
+    # This allows you to add multiple admins via env var, e.g., "123,456"
+    ADMIN_ID_LIST = os.environ.get("ADMIN_ID_LIST", "").split(",")
+    admin_ids.extend([int(aid) for aid in ADMIN_ID_LIST if aid.isdigit()])
+except:
+    pass
+
+admin_filter = filters.user(list(set(admin_ids))) # Ensure unique IDs
 
 # --- Helper Function ---
 async def get_user_id_from_message(message: Message) -> int | None:
@@ -31,6 +41,7 @@ async def get_user_id_from_message(message: Message) -> int | None:
 @Client.on_message(filters.command("stats") & admin_filter & filters.private)
 async def stats_command(client: Client, message: Message):
     """Sends bot usage statistics."""
+    # ... (existing code, no changes)
     stats = await get_bot_stats()
     await message.reply_text(
         f"**Bot Statistics**\n\n"
@@ -43,6 +54,7 @@ async def stats_command(client: Client, message: Message):
 @Client.on_message(filters.command("broadcast") & admin_filter & filters.private)
 async def broadcast_command(client: Client, message: Message):
     """Broadcasts a message to all non-banned users."""
+    # ... (existing code, no changes)
     if not message.reply_to_message:
         await message.reply_text("Please reply to a message to broadcast it.")
         return
@@ -81,6 +93,7 @@ async def broadcast_command(client: Client, message: Message):
         f"Failed for: `{fail_count}` users"
     )
 
+# ... (other admin commands like grant_premium, ban, etc. - no changes)
 @Client.on_message(filters.command("grant_premium") & admin_filter & filters.private)
 async def grant_premium_command(client: Client, message: Message):
     """Grants premium access to a user."""
@@ -130,8 +143,8 @@ async def ban_command(client: Client, message: Message):
         await message.reply_text("Reply to a user or provide user ID.")
         return
         
-    if user_id == ADMIN_ID:
-        await message.reply_text("You cannot ban yourself, admin.")
+    if user_id in admin_ids:
+        await message.reply_text("You cannot ban an admin.")
         return
         
     await update_user_ban(user_id, True)
@@ -157,3 +170,13 @@ async def add_admin_command(client: Client, message: Message):
         return
     await update_user_admin(user_id, True)
     await message.reply_text(f"User `{user_id}` is now an admin.")
+    
+# --- NEW COMMAND ---
+@Client.on_message(filters.command("log") & admin_filter & filters.private)
+async def send_log_command(client: Client, message: Message):
+    """Sends the bot's log file to the admin."""
+    LOG_FILE = "bot_logs.log"
+    if os.path.exists(LOG_FILE):
+        await message.reply_document(LOG_FILE, caption="Here is the bot's log file.")
+    else:
+        await message.reply_text("Log file not found.")
