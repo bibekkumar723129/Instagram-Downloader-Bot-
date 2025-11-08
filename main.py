@@ -2,10 +2,10 @@ import asyncio
 import logging
 import os
 from pyrogram import Client, idle
-from aiohttp import web  # Import for web server
+from aiohttp import web
 from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID
 from Database.db import init_db
-from downloader import L, login_instaloader
+from downloader import L, login_instaloader, L
 
 # --- File & Console Logging Setup ---
 LOG_FILE = "bot_logs.log"
@@ -13,8 +13,8 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE),  # Log to file
-        logging.StreamHandler()         # Log to console
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ app = Client(
     plugins=dict(root="Plugins")
 )
 
-# --- Web Server for Health Checks (Render Free Tier) ---
+# --- Web Server for Health Checks ---
 async def health_check(request):
     """A simple health check endpoint."""
     return web.Response(text="Bot is alive and running!", status=200)
@@ -37,8 +37,6 @@ async def start_web_server():
     """Initializes and starts the lightweight web server."""
     web_app = web.Application()
     web_app.add_routes([web.get('/', health_check)])
-    
-    # Render provides the PORT env var
     port = int(os.environ.get("PORT", 8080))
     
     runner = web.AppRunner(web_app)
@@ -50,9 +48,23 @@ async def start_web_server():
         logger.info(f"Web server started successfully on port {port}")
     except Exception as e:
         logger.error(f"Failed to start web server: {e}")
-        # If web server fails, we might not want the bot to start
         raise
     return runner, site
+
+# --- NEW: Background Task for Instaloader ---
+async def background_instaloader_login():
+    """
+    Attempts to log into Instaloader in the background
+    so it doesn't block bot startup.
+    """
+    logger.info("Starting background Instaloader login...")
+    await asyncio.sleep(5) # Give the bot 5 seconds to start up
+    try:
+        # Run the blocking login function in a separate thread
+        await asyncio.to_thread(login_instaloader)
+        logger.info("Background Instaloader login attempt complete.")
+    except Exception as e:
+        logger.error(f"Background Instaloader login task failed: {e}")
 
 # --- Main Bot & Server Function ---
 async def main():
@@ -60,14 +72,19 @@ async def main():
     await init_db()
     logger.info("Database initialized.")
 
-    await asyncio.to_thread(login_instaloader)
-    logger.info("Instaloader login attempt complete.")
-
+    # --- START WEB AND BOT FIRST ---
+    # This ensures the bot is responsive immediately
     web_runner, web_site = await start_web_server()
 
     logger.info("Starting Bot...")
     await app.start()
     
+    logger.info("Bot is starting up...")
+
+    # --- NOW, try the Instaloader login in the background ---
+    # This is no longer blocking startup.
+    asyncio.create_task(background_instaloader_login())
+
     try:
         me = await app.get_me()
         logger.info(f"Bot started as {me.first_name} (@{me.username})")
@@ -77,7 +94,7 @@ async def main():
             try:
                 await app.send_message(ADMIN_ID, "✅ **Bot has restarted successfully!**\n\nI'm online and ready.")
             except Exception as e:
-                logger.warning(f"Could not send restart message to ADMIN_ID {ADMIN_ID}. Maybe they haven't started the bot? Error: {e}")
+                logger.warning(f"Could not send restart message to ADMIN_ID {ADMIN_ID}. Error: {e}")
         else:
             logger.warning("ADMIN_ID is not set. Skipping restart message.")
 
@@ -88,10 +105,12 @@ async def main():
     await idle()
     
     # --- Shutdown sequence ---
+    # This code runs after /stop or Ctrl+C
     logger.info("Shutting down...")
-    await app.stop()
     await web_runner.cleanup()  # Cleanly stop the web server
-    logger.info("Bot and web server stopped.")
+    logger.info("Web server stopped.")
+    # We skip app.stop() as it can cause loop errors on Render
+    # The OS will terminate the process.
 
 if __name__ == "__main__":
     try:
